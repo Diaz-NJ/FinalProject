@@ -6,9 +6,10 @@ import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
 import java.text.NumberFormat;
-import javax.swing.event.DocumentListener;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
+import javax.swing.Timer;
 
 public class InventorySystem extends JFrame {
     private List<InventoryItem> inventory = new ArrayList<>();
@@ -19,8 +20,9 @@ public class InventorySystem extends JFrame {
     // GUI Components
     private JTextField idField, nameField, searchField;
     private JFormattedTextField quantityField, priceField;
-    private JButton addButton, updateButton, deleteButton, clearButton, exportButton;
+    private JButton addButton, updateButton, deleteButton, clearButton, exportButton, showAllButton;
     private JLabel dateLabel;
+    private Timer searchTimer; // For debouncing search
 
     public InventorySystem() {
         setTitle("Inventory Management System");
@@ -136,12 +138,14 @@ public class InventorySystem extends JFrame {
         deleteButton = new JButton("Delete");
         clearButton = new JButton("Clear");
         exportButton = new JButton("Export");
+        showAllButton = new JButton("Show All");
         
         buttonPanel.add(addButton);
         buttonPanel.add(updateButton);
         buttonPanel.add(deleteButton);
         buttonPanel.add(clearButton);
         buttonPanel.add(exportButton);
+        buttonPanel.add(showAllButton);
         mainPanel.add(buttonPanel, gbc);
 
         // Add components to frame
@@ -153,6 +157,7 @@ public class InventorySystem extends JFrame {
         deleteButton.setToolTipText("Delete selected item (Alt+D)");
         clearButton.setToolTipText("Clear form (Alt+C)");
         exportButton.setToolTipText("Export to CSV (Alt+E)");
+        showAllButton.setToolTipText("Show all inventory items (Alt+S)");
         searchField.setToolTipText("Search by ID or name");
 
         // Add action listeners
@@ -161,10 +166,23 @@ public class InventorySystem extends JFrame {
         deleteButton.addActionListener(e -> deleteItem());
         clearButton.addActionListener(e -> clearForm());
         exportButton.addActionListener(e -> exportToCsv());
-        searchField.getDocument().addDocumentListener(new DocumentListener() {
-            public void insertUpdate(DocumentEvent e) { filterItems(); }
-            public void removeUpdate(DocumentEvent e) { filterItems(); }
-            public void changedUpdate(DocumentEvent e) { filterItems(); }
+        showAllButton.addActionListener(e -> showAllItems());
+
+        // Initialize search debounce timer
+        searchTimer = new Timer(300, e -> filterItems());
+        searchTimer.setRepeats(false);
+
+        // Search listener with debounce
+        searchField.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyReleased(KeyEvent e) {
+                searchTimer.restart();
+            }
+        });
+
+        // Consume Enter key in search field to prevent triggering addButton
+        searchField.addActionListener(e -> {
+            filterItems(); // Apply filter immediately on Enter
         });
 
         // Keyboard shortcuts
@@ -173,7 +191,9 @@ public class InventorySystem extends JFrame {
         deleteButton.setMnemonic(KeyEvent.VK_D);
         clearButton.setMnemonic(KeyEvent.VK_C);
         exportButton.setMnemonic(KeyEvent.VK_E);
-        getRootPane().setDefaultButton(addButton);
+        showAllButton.setMnemonic(KeyEvent.VK_S);
+        // Removed default button to prevent accidental addItem on Enter
+        // getRootPane().setDefaultButton(addButton);
 
         // Table selection listener
         table.getSelectionModel().addListSelectionListener(e -> {
@@ -201,16 +221,30 @@ public class InventorySystem extends JFrame {
 
     private void filterItems() {
         String query = searchField.getText().trim().toLowerCase();
-        if (query.isEmpty()) {
+        try {
+            if (query.isEmpty()) {
+                sorter.setRowFilter(null);
+            } else {
+                String escapedQuery = Pattern.quote(query);
+                sorter.setRowFilter(RowFilter.orFilter(
+                    List.of(
+                        RowFilter.regexFilter("(?i)" + escapedQuery, 0), // ID
+                        RowFilter.regexFilter("(?i)" + escapedQuery, 1)  // Name
+                    )
+                ));
+            }
+        } catch (Exception e) {
+            System.err.println("Filter error: " + e.getMessage());
             sorter.setRowFilter(null);
-        } else {
-            sorter.setRowFilter(RowFilter.orFilter(
-                List.of(
-                    RowFilter.regexFilter("(?i)" + query, 0), // ID
-                    RowFilter.regexFilter("(?i)" + query, 1)  // Name
-                )
-            ));
         }
+        table.repaint();
+    }
+
+    private void showAllItems() {
+        searchField.setText(""); // Clear search field
+        sorter.setRowFilter(null); // Reset filter
+        table.repaint();
+        clearForm(); // Clear form to avoid confusion
     }
 
     private boolean isUniqueId(String id, int excludeIndex) {
@@ -239,6 +273,7 @@ public class InventorySystem extends JFrame {
         } else if (!isUniqueId(id, -1)) {
             JOptionPane.showMessageDialog(this, "ID already exists");
         }
+        // No error message here; validateInput handles it
     }
 
     private void updateItem() {
@@ -262,6 +297,7 @@ public class InventorySystem extends JFrame {
         } else if (selectedRow < 0) {
             JOptionPane.showMessageDialog(this, "Please select an item to update");
         }
+        // No error message here; validateInput handles it
     }
 
     private void deleteItem() {
@@ -319,7 +355,8 @@ public class InventorySystem extends JFrame {
                     item.getQuantity(), item.getPrice()));
             }
         } catch (IOException e) {
-            JOptionPane.showMessageDialog(this, "Error saving data");
+            System.err.println("Save error: " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Error saving data: " + e.getMessage());
         }
     }
 
@@ -331,15 +368,22 @@ public class InventorySystem extends JFrame {
             while ((line = reader.readLine()) != null) {
                 String[] parts = line.split(",", -1);
                 if (parts.length == 4) {
-                    inventory.add(new InventoryItem(
-                        parts[0], parts[1],
-                        Integer.parseInt(parts[2]), Double.parseDouble(parts[3])
-                    ));
+                    try {
+                        inventory.add(new InventoryItem(
+                            parts[0], parts[1],
+                            Integer.parseInt(parts[2]), Double.parseDouble(parts[3])
+                        ));
+                    } catch (NumberFormatException e) {
+                        System.err.println("Skipping invalid line: " + line + ", error: " + e.getMessage());
+                    }
+                } else {
+                    System.err.println("Skipping malformed line: " + line);
                 }
             }
             tableModel.fireTableDataChanged();
-        } catch (IOException | NumberFormatException e) {
-            JOptionPane.showMessageDialog(this, "Error loading data");
+        } catch (IOException e) {
+            System.err.println("Load error: " + e.getMessage());
+            JOptionPane.showMessageDialog(this, "Error loading data: " + e.getMessage());
         }
     }
 
@@ -356,7 +400,8 @@ public class InventorySystem extends JFrame {
                 }
                 JOptionPane.showMessageDialog(this, "Export successful");
             } catch (IOException e) {
-                JOptionPane.showMessageDialog(this, "Error exporting data");
+                System.err.println("Export error: " + e.getMessage());
+                JOptionPane.showMessageDialog(this, "Error exporting data: " + e.getMessage());
             }
         }
     }
