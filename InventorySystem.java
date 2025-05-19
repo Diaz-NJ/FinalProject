@@ -1,6 +1,12 @@
 import javax.swing.*;
+import javax.swing.table.TableRowSorter;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.text.NumberFormatter;
 import java.awt.*;
 import java.awt.event.*;
+import java.io.*;
+import java.text.NumberFormat;
+import javax.swing.event.DocumentListener;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -8,192 +14,368 @@ public class InventorySystem extends JFrame {
     private List<InventoryItem> inventory = new ArrayList<>();
     private JTable table;
     private InventoryTableModel tableModel;
+    private TableRowSorter<InventoryTableModel> sorter;
 
     // GUI Components
-    private JTextField idField, nameField, quantityField, priceField;
-    private JButton addButton, updateButton, deleteButton, clearButton;
+    private JTextField idField, nameField, searchField;
+    private JFormattedTextField quantityField, priceField;
+    private JButton addButton, updateButton, deleteButton, clearButton, exportButton;
+    private JLabel dateLabel;
 
     public InventorySystem() {
         setTitle("Inventory Management System");
-        setSize(800, 600);
+        setSize(1000, 700);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
 
-        // Initialize the table model
-        tableModel = new InventoryTableModel(inventory);
-        table = new JTable(tableModel);
-        JScrollPane scrollPane = new JScrollPane(table);
+        // Main panel with GridBagLayout for proper scaling
+        JPanel mainPanel = new JPanel(new GridBagLayout());
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
 
-        // Create form panel
-        JPanel formPanel = new JPanel(new GridLayout(4, 2, 5, 5));
-        formPanel.setBorder(BorderFactory.createTitledBorder("Item Details"));
+        // 1. Search Panel (top)
+        gbc.gridx = 0; gbc.gridy = 0;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1.0;
+        JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        searchPanel.add(new JLabel("Search:"));
+        searchField = new JTextField(20);
+        searchPanel.add(searchField);
+        mainPanel.add(searchPanel, gbc);
+
+        // 2. Item Information Panel
+        gbc.gridy = 1;
+        gbc.gridwidth = 2;
+        JPanel infoPanel = new JPanel(new GridBagLayout());
+        infoPanel.setBorder(BorderFactory.createTitledBorder("Item Information"));
+        
+        GridBagConstraints gbcInfo = new GridBagConstraints();
+        gbcInfo.insets = new Insets(2, 2, 2, 2);
+        gbcInfo.fill = GridBagConstraints.HORIZONTAL;
 
         // ID Field
-        formPanel.add(new JLabel("Item ID:"));
-        idField = new JTextField();
-        formPanel.add(idField);
+        gbcInfo.gridx = 0; gbcInfo.gridy = 0;
+        infoPanel.add(new JLabel("ID:"), gbcInfo);
+        gbcInfo.gridx = 1;
+        idField = new JTextField(10);
+        infoPanel.add(idField, gbcInfo);
 
-        // Name Field
-        formPanel.add(new JLabel("Item Name:"));
-        nameField = new JTextField();
-        formPanel.add(nameField);
+        // Name
+        gbcInfo.gridx = 2; gbcInfo.gridy = 0;
+        infoPanel.add(new JLabel("Name:"), gbcInfo);
+        gbcInfo.gridx = 3;
+        nameField = new JTextField(15);
+        infoPanel.add(nameField, gbcInfo);
 
-        // Quantity Field
-        formPanel.add(new JLabel("Quantity:"));
-        quantityField = new JTextField();
-        formPanel.add(quantityField);
+        // Quantity
+        gbcInfo.gridx = 4; gbcInfo.gridy = 0;
+        infoPanel.add(new JLabel("Quantity:"), gbcInfo);
+        gbcInfo.gridx = 5;
+        NumberFormat intFormat = NumberFormat.getIntegerInstance();
+        intFormat.setGroupingUsed(false);
+        NumberFormatter intFormatter = new NumberFormatter(intFormat);
+        intFormatter.setMinimum(0);
+        quantityField = new JFormattedTextField(intFormatter);
+        quantityField.setColumns(5);
+        infoPanel.add(quantityField, gbcInfo);
 
-        // Price Field
-        formPanel.add(new JLabel("Price:"));
-        priceField = new JTextField();
-        formPanel.add(priceField);
+        // Price
+        gbcInfo.gridx = 6; gbcInfo.gridy = 0;
+        infoPanel.add(new JLabel("Price:"), gbcInfo);
+        gbcInfo.gridx = 7;
+        NumberFormat decimalFormat = NumberFormat.getNumberInstance();
+        decimalFormat.setMinimumFractionDigits(2);
+        decimalFormat.setMaximumFractionDigits(2);
+        NumberFormatter decimalFormatter = new NumberFormatter(decimalFormat);
+        decimalFormatter.setMinimum(0.0);
+        priceField = new JFormattedTextField(decimalFormatter);
+        priceField.setColumns(8);
+        infoPanel.add(priceField, gbcInfo);
 
-        // Button Panel
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+        // Date
+        gbcInfo.gridx = 3; gbcInfo.gridy = 1;
+        gbcInfo.gridwidth = 8;
+        dateLabel = new JLabel("Date: " + new java.util.Date());
+        infoPanel.add(dateLabel, gbcInfo);
+
+        mainPanel.add(infoPanel, gbc);
+
+        // 3. Table (center - takes most space)
+        gbc.gridy = 2;
+        gbc.gridwidth = 2;
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        tableModel = new InventoryTableModel(inventory);
+        table = new JTable(tableModel);
+        sorter = new TableRowSorter<>(tableModel);
+        table.setRowSorter(sorter);
+        // Right-align numeric columns
+        DefaultTableCellRenderer rightRenderer = new DefaultTableCellRenderer();
+        rightRenderer.setHorizontalAlignment(JLabel.RIGHT);
+        table.getColumnModel().getColumn(2).setCellRenderer(rightRenderer); // Quantity
+        table.getColumnModel().getColumn(3).setCellRenderer(rightRenderer); // Price
+        table.getColumnModel().getColumn(4).setCellRenderer(rightRenderer); // Total Value
+        // Custom comparator for Total Value
+        sorter.setComparator(4, (String s1, String s2) -> {
+            double v1 = Double.parseDouble(s1.replace("$", ""));
+            double v2 = Double.parseDouble(s2.replace("$", ""));
+            return Double.compare(v1, v2);
+        });
+        JScrollPane scrollPane = new JScrollPane(table);
+        mainPanel.add(scrollPane, gbc);
+
+        // 4. Buttons Panel (bottom)
+        gbc.gridy = 3;
+        gbc.weighty = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 5));
         addButton = new JButton("Add");
         updateButton = new JButton("Update");
         deleteButton = new JButton("Delete");
         clearButton = new JButton("Clear");
-
+        exportButton = new JButton("Export");
+        
         buttonPanel.add(addButton);
         buttonPanel.add(updateButton);
         buttonPanel.add(deleteButton);
         buttonPanel.add(clearButton);
+        buttonPanel.add(exportButton);
+        mainPanel.add(buttonPanel, gbc);
+
+        // Add components to frame
+        add(mainPanel);
+
+        // Set tooltips
+        addButton.setToolTipText("Add new item (Alt+A)");
+        updateButton.setToolTipText("Update selected item (Alt+U)");
+        deleteButton.setToolTipText("Delete selected item (Alt+D)");
+        clearButton.setToolTipText("Clear form (Alt+C)");
+        exportButton.setToolTipText("Export to CSV (Alt+E)");
+        searchField.setToolTipText("Search by ID or name");
 
         // Add action listeners
-        addButton.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) {
-                addItem();
-            }
+        addButton.addActionListener(e -> addItem());
+        updateButton.addActionListener(e -> updateItem());
+        deleteButton.addActionListener(e -> deleteItem());
+        clearButton.addActionListener(e -> clearForm());
+        exportButton.addActionListener(e -> exportToCsv());
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            public void insertUpdate(DocumentEvent e) { filterItems(); }
+            public void removeUpdate(DocumentEvent e) { filterItems(); }
+            public void changedUpdate(DocumentEvent e) { filterItems(); }
         });
 
-        updateButton.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) {
-                updateItem();
-            }
-        });
-
-        deleteButton.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) {
-                deleteItem();
-            }
-        });
-
-        clearButton.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent e) {
-                clearForm();
-            }
-        });
+        // Keyboard shortcuts
+        addButton.setMnemonic(KeyEvent.VK_A);
+        updateButton.setMnemonic(KeyEvent.VK_U);
+        deleteButton.setMnemonic(KeyEvent.VK_D);
+        clearButton.setMnemonic(KeyEvent.VK_C);
+        exportButton.setMnemonic(KeyEvent.VK_E);
+        getRootPane().setDefaultButton(addButton);
 
         // Table selection listener
         table.getSelectionModel().addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                int selectedRow = table.getSelectedRow();
-                if (selectedRow >= 0) {
-                    InventoryItem item = inventory.get(selectedRow);
-                    idField.setText(item.getId());
-                    nameField.setText(item.getName());
-                    quantityField.setText(String.valueOf(item.getQuantity()));
-                    priceField.setText(String.valueOf(item.getPrice()));
-                }
+            if (!e.getValueIsAdjusting() && table.getSelectedRow() >= 0) {
+                int modelRow = table.convertRowIndexToModel(table.getSelectedRow());
+                InventoryItem item = inventory.get(modelRow);
+                idField.setText(item.getId());
+                nameField.setText(item.getName());
+                quantityField.setValue(item.getQuantity());
+                priceField.setValue(item.getPrice());
             }
         });
 
-        // Layout the main panel
-        JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
-        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        mainPanel.add(formPanel, BorderLayout.NORTH);
-        mainPanel.add(scrollPane, BorderLayout.CENTER);
-        mainPanel.add(buttonPanel, BorderLayout.SOUTH);
+        // Load inventory from file
+        loadFromFile();
 
-        add(mainPanel);
+        // Save on window close
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                saveToFile();
+            }
+        });
+    }
+
+    private void filterItems() {
+        String query = searchField.getText().trim().toLowerCase();
+        if (query.isEmpty()) {
+            sorter.setRowFilter(null);
+        } else {
+            sorter.setRowFilter(RowFilter.orFilter(
+                List.of(
+                    RowFilter.regexFilter("(?i)" + query, 0), // ID
+                    RowFilter.regexFilter("(?i)" + query, 1)  // Name
+                )
+            ));
+        }
+    }
+
+    private boolean isUniqueId(String id, int excludeIndex) {
+        for (int i = 0; i < inventory.size(); i++) {
+            if (i != excludeIndex && inventory.get(i).getId().equalsIgnoreCase(id)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void addItem() {
-        try {
-            String id = idField.getText().trim();
-            String name = nameField.getText().trim();
-            int quantity = Integer.parseInt(quantityField.getText().trim());
-            double price = Double.parseDouble(priceField.getText().trim());
-
-            if (id.isEmpty() || name.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "ID and Name cannot be empty", "Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            InventoryItem newItem = new InventoryItem(id, name, quantity, price);
-            inventory.add(newItem);
+        String id = idField.getText().trim();
+        if (validateInput() && isUniqueId(id, -1)) {
+            InventoryItem item = new InventoryItem(
+                id, nameField.getText().trim(),
+                ((Number) quantityField.getValue()).intValue(),
+                ((Number) priceField.getValue()).doubleValue()
+            );
+            inventory.add(item);
             tableModel.fireTableDataChanged();
             clearForm();
-        } catch (NumberFormatException ex) {
-            JOptionPane.showMessageDialog(this, "Please enter valid numbers for quantity and price", "Error", JOptionPane.ERROR_MESSAGE);
+            saveToFile();
+            checkLowStock(item);
+            dateLabel.setText("Date: " + new java.util.Date());
+        } else if (!isUniqueId(id, -1)) {
+            JOptionPane.showMessageDialog(this, "ID already exists");
         }
     }
 
     private void updateItem() {
         int selectedRow = table.getSelectedRow();
-        if (selectedRow >= 0) {
-            try {
-                String id = idField.getText().trim();
-                String name = nameField.getText().trim();
-                int quantity = Integer.parseInt(quantityField.getText().trim());
-                double price = Double.parseDouble(priceField.getText().trim());
-
-                if (id.isEmpty() || name.isEmpty()) {
-                    JOptionPane.showMessageDialog(this, "ID and Name cannot be empty", "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-
-                InventoryItem item = inventory.get(selectedRow);
+        if (selectedRow >= 0 && validateInput()) {
+            int modelRow = table.convertRowIndexToModel(selectedRow);
+            String id = idField.getText().trim();
+            if (isUniqueId(id, modelRow)) {
+                InventoryItem item = inventory.get(modelRow);
                 item.setId(id);
-                item.setName(name);
-                item.setQuantity(quantity);
-                item.setPrice(price);
-
+                item.setName(nameField.getText().trim());
+                item.setQuantity(((Number) quantityField.getValue()).intValue());
+                item.setPrice(((Number) priceField.getValue()).doubleValue());
                 tableModel.fireTableDataChanged();
-                clearForm();
-            } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(this, "Please enter valid numbers for quantity and price", "Error", JOptionPane.ERROR_MESSAGE);
+                saveToFile();
+                checkLowStock(item);
+                dateLabel.setText("Date: " + new java.util.Date());
+            } else {
+                JOptionPane.showMessageDialog(this, "ID already exists");
             }
-        } else {
-            JOptionPane.showMessageDialog(this, "Please select an item to update", "Error", JOptionPane.ERROR_MESSAGE);
+        } else if (selectedRow < 0) {
+            JOptionPane.showMessageDialog(this, "Please select an item to update");
         }
     }
 
     private void deleteItem() {
         int selectedRow = table.getSelectedRow();
         if (selectedRow >= 0) {
-            inventory.remove(selectedRow);
-            tableModel.fireTableDataChanged();
-            clearForm();
+            int confirm = JOptionPane.showConfirmDialog(this,
+                "Are you sure you want to delete this item?", "Confirm Delete",
+                JOptionPane.YES_NO_OPTION);
+            if (confirm == JOptionPane.YES_OPTION) {
+                inventory.remove(table.convertRowIndexToModel(selectedRow));
+                tableModel.fireTableDataChanged();
+                clearForm();
+                saveToFile();
+                dateLabel.setText("Date: " + new java.util.Date());
+            }
         } else {
-            JOptionPane.showMessageDialog(this, "Please select an item to delete", "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Please select an item to delete");
         }
     }
 
     private void clearForm() {
         idField.setText("");
         nameField.setText("");
-        quantityField.setText("");
-        priceField.setText("");
+        quantityField.setValue(null);
+        priceField.setValue(null);
         table.clearSelection();
     }
 
-    /**
-     *
-     * @param args
-     */
+    private boolean validateInput() {
+        try {
+            if (idField.getText().trim().isEmpty() || nameField.getText().trim().isEmpty()) {
+                throw new Exception("ID and Name are required");
+            }
+            Number quantityObj = (Number) quantityField.getValue();
+            Number priceObj = (Number) priceField.getValue();
+            if (quantityObj == null || priceObj == null) {
+                throw new Exception("Invalid quantity or price");
+            }
+            int quantity = quantityObj.intValue();
+            double price = priceObj.doubleValue();
+            if (quantity < 0) throw new Exception("Quantity cannot be negative");
+            if (price < 0) throw new Exception("Price cannot be negative");
+            return true;
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, e.getMessage());
+            return false;
+        }
+    }
+
+    private void saveToFile() {
+        try (PrintWriter writer = new PrintWriter("inventory.csv")) {
+            for (InventoryItem item : inventory) {
+                writer.println(String.format("%s,%s,%d,%.2f",
+                    item.getId(), item.getName().replace(",", ""),
+                    item.getQuantity(), item.getPrice()));
+            }
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "Error saving data");
+        }
+    }
+
+    private void loadFromFile() {
+        File file = new File("inventory.csv");
+        if (!file.exists()) return;
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",", -1);
+                if (parts.length == 4) {
+                    inventory.add(new InventoryItem(
+                        parts[0], parts[1],
+                        Integer.parseInt(parts[2]), Double.parseDouble(parts[3])
+                    ));
+                }
+            }
+            tableModel.fireTableDataChanged();
+        } catch (IOException | NumberFormatException e) {
+            JOptionPane.showMessageDialog(this, "Error loading data");
+        }
+    }
+
+    private void exportToCsv() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setSelectedFile(new File("inventory_export.csv"));
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            try (PrintWriter writer = new PrintWriter(fileChooser.getSelectedFile())) {
+                writer.println("ID,Name,Quantity,Price,Total Value");
+                for (InventoryItem item : inventory) {
+                    writer.println(String.format("%s,%s,%d,%.2f,%.2f",
+                        item.getId(), item.getName().replace(",", ""),
+                        item.getQuantity(), item.getPrice(), item.getQuantity() * item.getPrice()));
+                }
+                JOptionPane.showMessageDialog(this, "Export successful");
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(this, "Error exporting data");
+            }
+        }
+    }
+
+    private void checkLowStock(InventoryItem item) {
+        if (item.getQuantity() <= 5) {
+            JOptionPane.showMessageDialog(this,
+                "Warning: Low stock for " + item.getName() + " (Quantity: " + item.getQuantity() + ")",
+                "Low Stock Alert", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> {
-            InventorySystem system = new InventorySystem();
-            system.setVisible(true);
-        });
+        SwingUtilities.invokeLater(() -> new InventorySystem().setVisible(true));
     }
 }
 
 class InventoryItem {
-    private String id;
-    private String name;
+    private String id, name;
     private int quantity;
     private double price;
 
@@ -204,7 +386,6 @@ class InventoryItem {
         this.price = price;
     }
 
-    // Getters and Setters
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getName() { return name; }
@@ -217,43 +398,26 @@ class InventoryItem {
 
 class InventoryTableModel extends javax.swing.table.AbstractTableModel {
     private final List<InventoryItem> inventory;
-    private final String[] columnNames = {"ID", "Name", "Quantity", "Price", "Total Value"};
+    private final String[] columns = {"ID", "Name", "Quantity", "Price", "Total Value"};
 
     public InventoryTableModel(List<InventoryItem> inventory) {
         this.inventory = inventory;
     }
 
-    @Override
-    public int getRowCount() {
-        return inventory.size();
-    }
+    @Override public int getRowCount() { return inventory.size(); }
+    @Override public int getColumnCount() { return columns.length; }
+    @Override public String getColumnName(int column) { return columns[column]; }
 
     @Override
-    public int getColumnCount() {
-        return columnNames.length;
-    }
-
-    @Override
-    public String getColumnName(int column) {
-        return columnNames[column];
-    }
-
-    @Override
-    public Object getValueAt(int rowIndex, int columnIndex) {
-        InventoryItem item = inventory.get(rowIndex);
-        switch (columnIndex) {
-            case 0: return item.getId();
-            case 1: return item.getName();
-            case 2: return item.getQuantity();
-            case 3: return String.format("$%.2f", item.getPrice());
-            case 4: return String.format("$%.2f", item.getQuantity() * item.getPrice());
-            default: return null;
-        }
-    }
-
-    @Override
-    public boolean isCellEditable(int rowIndex, int columnIndex) {
-        return false; // Make all cells non-editable
+    public Object getValueAt(int row, int column) {
+        InventoryItem item = inventory.get(row);
+        return switch (column) {
+            case 0 -> item.getId();
+            case 1 -> item.getName();
+            case 2 -> item.getQuantity();
+            case 3 -> String.format("$%.2f", item.getPrice());
+            case 4 -> String.format("$%.2f", item.getQuantity() * item.getPrice());
+            default -> null;
+        };
     }
 }
-
